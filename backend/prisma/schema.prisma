@@ -1,0 +1,62 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  name         String
+  email        String   @unique
+  phone        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  contacts     TrustedContact[]
+  incidents    Incident[]
+  sosAlerts    SOSAlert[]
+}
+
+model TrustedContact {
+  id             Int     @id @default(autoincrement())
+  userId         Int
+  name           String
+  email          String
+  phone          String?
+  notifyViaSms   Boolean @default(true)
+  notifyViaEmail Boolean @default(false)
+
+  user           User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Incident {
+  id           Int      @id @default(autoincrement())
+  reporterId   Int?
+  latitude     Float
+  longitude    Float
+  incidentType String
+  severity     Int      @default(1)
+  description  String
+  areaName     String?
+  timeOfDay    Int?
+  reportedAt   DateTime @default(now())
+  isVerified   Boolean  @default(false)
+
+  reporter     User?    @relation(fields: [reporterId], references: [id], onDelete: SetNull)
+}
+
+model SOSAlert {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  latitude    Float
+  longitude   Float
+  message     String   @default("I need help! Please check on me immediately.")
+  status      String   @default("active")
+  triggeredAt DateTime @default(now())
+  resolvedAt  DateTime?
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

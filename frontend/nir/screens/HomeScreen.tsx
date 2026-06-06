@@ -1,26 +1,25 @@
-import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, Text, View, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../components/ui/theme';
+import DadFakeCallModal from './FakeCallModal'; // Make sure the path matches your project structure!
 
 type HomeRoute = 'SOS' | 'Report' | 'Heatmap' | 'Contacts' | 'About';
 
 function RowItem({
   title,
   subtitle,
-  to,
+  onPress,
   accent,
 }: {
   title: string;
   subtitle: string;
-  to: HomeRoute;
+  onPress: () => void;
   accent: string;
 }) {
-  const navigation = useNavigation<any>();
-
   return (
     <Pressable
-      onPress={() => navigation.navigate(to)}
+      onPress={onPress}
       style={({ pressed }) => [styles.rowItem, pressed && { opacity: 0.92 }]}
     >
       <View style={[styles.accentBar, { backgroundColor: accent }]} />
@@ -56,6 +55,24 @@ function SOSBanner() {
 }
 
 export default function HomeScreen() {
+  const navigation = useNavigation<any>();
+  
+  // Fake Call Feature States
+  const [callModalVisible, setCallModalVisible] = useState(false);
+  const [countdownActive, setCountdownActive] = useState(false);
+
+  function triggerFakeCallEscape() {
+    if (countdownActive) return;
+
+    setCountdownActive(true);
+
+    // 10-second stealth operational window
+    setTimeout(() => {
+      setCallModalVisible(true);
+      setCountdownActive(false);
+    }, 10000);
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.headerCard}>
@@ -71,33 +88,65 @@ export default function HomeScreen() {
         <RowItem
           title="Report an incident"
           subtitle="Submit a community report (uses your location)"
-          to="Report"
+          onPress={() => navigation.navigate('Report')}
           accent={colors.warning}
         />
         <RowItem
           title="Safety map"
           subtitle="See nearby reports on map + list"
-          to="Heatmap"
+          onPress={() => navigation.navigate('Heatmap')}
           accent={colors.safe}
         />
+        
+        {/* FAKE CALL ESCAPE ROUTE BUTTON */}
+        <Pressable
+          onPress={triggerFakeCallEscape}
+          style={({ pressed }) => [
+            styles.rowItem, 
+            pressed && { opacity: 0.92 },
+            countdownActive && { borderColor: '#D97706', backgroundColor: 'rgba(217, 119, 6, 0.05)' }
+          ]}
+        >
+          <View style={[styles.accentBar, { backgroundColor: countdownActive ? '#D97706' : '#9333EA' }]} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowTitle}>
+              {countdownActive ? "Preparing Fake Call..." : "Fake Call Escape"}
+            </Text>
+            <Text style={styles.rowSub}>
+              {countdownActive ? "Stealth mode active. Incoming call in 10s." : "Triggers an authentic incoming call from 'Dad'"}
+            </Text>
+          </View>
+          {countdownActive ? (
+            <ActivityIndicator size="small" color="#D97706" style={{ marginRight: 4 }} />
+          ) : (
+            <Text style={styles.chev}>›</Text>
+          )}
+        </Pressable>
+
         <RowItem
           title="Trusted contacts"
           subtitle="Add people to notify during SOS"
-          to="Contacts"
+          onPress={() => navigation.navigate('Contacts')}
           accent={colors.primary2}
         />
         <RowItem
           title="About"
           subtitle="App info, privacy note, logout"
-          to="About"
+          onPress={() => navigation.navigate('About')}
           accent={colors.muted}
         />
       </View>
 
       <View style={styles.tipCard}>
         <Text style={styles.tipTitle}>Tip</Text>
-        <Text style={styles.tipText}>Set up your trusted contacts first. Then SOS becomes one-tap.</Text>
+        <Text style={styles.tipText}>Tap 'Fake Call Escape' to queue a call. It gives you 10 seconds to slip your phone back into your hand or pocket naturally.</Text>
       </View>
+
+      {/* RENDER THE MODAL OVERLAY PORTAL */}
+      <DadFakeCallModal 
+        visible={callModalVisible} 
+        onClose={() => setCallModalVisible(false)} 
+      />
     </View>
   );
 }

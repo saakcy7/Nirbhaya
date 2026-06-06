@@ -1,6 +1,7 @@
 const express = require("express");
 const { z } = require("zod");
 const { Pool } = require("pg");
+const axios = require("axios");
 
 const router = express.Router();
 
@@ -12,7 +13,6 @@ const pool = new Pool({
 
 /**
  * 1. GET /heatmap/nearby
- * Returns raw incident objects within a circle radius for markers on the Map view
  */
 router.get("/nearby", async (req, res) => {
   const schema = z.object({
@@ -56,7 +56,6 @@ router.get("/nearby", async (req, res) => {
 
 /**
  * 2. GET /heatmap/grid
- * Aggregates point density distributions and maps weights
  */
 router.get("/grid", async (req, res) => {
   const schema = z.object({
@@ -98,7 +97,6 @@ router.get("/grid", async (req, res) => {
 
 /**
  * 3. GET /heatmap/risk-score
- * Computes localized risk analysis scoring for banners
  */
 router.get("/risk-score", async (req, res) => {
   const schema = z.object({
@@ -114,7 +112,6 @@ router.get("/risk-score", async (req, res) => {
   if (hour === undefined) hour = new Date().getHours();
 
   try {
-    // Looks inside an immediate 500 meter walking bubble
     const query = `
       SELECT "incidentType" AS type, severity
       FROM "Incident"
@@ -160,6 +157,84 @@ router.get("/risk-score", async (req, res) => {
   } catch (error) {
     console.error("Risk calculation error:", error);
     return res.status(500).json({ detail: "Failed to calculate risk scoring." });
+  }
+});
+
+/**
+ * 4. GET /heatmap/safest-route
+ * Evaluates OSRM alternative paths and orders them by localized corridor risk metrics
+ */
+router.get("/safest-route", async (req, res) => {
+  const schema = z.object({
+    start_lat: z.coerce.number(),
+    start_lng: z.coerce.number(),
+    end_lat: z.coerce.number(),
+    end_lng: z.coerce.number(),
+  });
+
+  const parsed = schema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ detail: parsed.error.flatten() });
+
+  const { start_lat, start_lng, end_lat, end_lng } = parsed.data;
+
+  try {
+    // Call Open Source Routing Machine for coordinate geometries
+    const osrmUrl = `https://router.project-osrm.org/route/v1/foot/${start_lng},${start_lat};${end_lng},${end_lat}?alternatives=true&geometries=geojson&overview=full`;
+    const osrmResponse = await axios.get(osrmUrl);
+
+    if (!osrmResponse.data.routes || osrmResponse.data.routes.length === 0) {
+      return res.status(404).json({ detail: "No alternative walking paths found between locations." });
+    }
+
+    const alternatives = osrmResponse.data.routes;
+    const processedRoutes = [];
+
+    for (let index = 0; index < alternatives.length; index++) {
+      const currentRoute = alternatives[index];
+      const geometryJson = JSON.stringify(currentRoute.geometry);
+
+      // Query database for incidents occurring inside a 75-meter buffer of this route coordinate line
+      const analyticalQuery = `
+        SELECT 
+          COUNT(*)::int as incident_count,
+          COALESCE(SUM(severity), 0)::int as total_severity
+        FROM "Incident"
+        WHERE ST_DWithin(
+          location,
+          ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)::geography,
+          75
+        );
+      `;
+
+      const analysisResult = await pool.query(analyticalQuery, [geometryJson]);
+      const { incident_count, total_severity } = analysisResult.rows[0];
+
+      // Cost Calculation Weight Metrics
+      const spatialRiskMetric = (incident_count * 2.5) + (total_severity * 1.5);
+
+      processedRoutes.push({
+        route_index: index,
+        distance_meters: currentRoute.distance,
+        duration_seconds: currentRoute.duration,
+        geometry: currentRoute.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng })),
+        risk_score: spatialRiskMetric,
+        incident_count
+      });
+    }
+
+    // Sort by risk footprint ascending, then duration profile
+    processedRoutes.sort((x, y) => {
+      if (x.risk_score === y.risk_score) return x.duration_seconds - y.duration_seconds;
+      return x.risk_score - y.risk_score;
+    });
+
+    return res.json({
+      safest_route: processedRoutes[0],
+      alternatives: processedRoutes.slice(1)
+    });
+  } catch (err) {
+    console.error("Safest path calculation processing error:", err);
+    return res.status(500).json({ detail: "Internal spatial routing algorithm failure." });
   }
 });
 

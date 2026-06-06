@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, Text, View, ActivityIndicator } from 'react-native';
 import * as Location from 'expo-location';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, { Marker, Polyline } from 'react-native-maps';
 
 import { colors, TYPE_COLORS } from '../components/ui/theme';
-import { incidentsAPI } from '../services/api';
 import { heatmapAPI } from '../services/api';
 
 type Incident = {
@@ -26,6 +25,20 @@ type RiskData = {
   dominant_type: string;
 };
 
+type RouteGeometryPoint = {
+  latitude: number;
+  longitude: number;
+};
+
+type RouteDetails = {
+  route_index: number;
+  distance_meters: number;
+  duration_seconds: number;
+  geometry: RouteGeometryPoint[];
+  risk_score: number;
+  incident_count: number;
+};
+
 function formatTimeOfDay(v: number | null | undefined) {
   if (v === null || v === undefined) return 'Unknown time';
   return `Hour ${v}`;
@@ -42,10 +55,14 @@ export default function HeatmapScreen() {
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [items, setItems] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(false);
+  const [routingLoading, setRoutingLoading] = useState(false);
   
-  // State is now populated cleanly directly via backend responses
   const [risk, setRisk] = useState<null | RiskData>(null);
   const [mode, setMode] = useState<'map' | 'list'>('map');
+
+  // Safest route engine specific visual hooks
+  const [destination, setDestination] = useState<{ lat: number; lng: number } | null>(null);
+  const [safestRoute, setSafestRoute] = useState<RouteDetails | null>(null);
 
   const headerLocationText = useMemo(() => {
     if (!coords) return 'Location: not set';
@@ -71,13 +88,14 @@ export default function HeatmapScreen() {
         c = await getMyLocation();
         if (!c) return;
         setCoords(c);
+        setDestination(null);
+        setSafestRoute(null);
       }
 
-      // INTEGRATION FIX: Perform both async queries in parallel over the network link
       const [incidentsResponse, riskResponse] = await Promise.all([
-  heatmapAPI.nearby(c.lat, c.lng, radiusKm), // Now hits /heatmap/nearby 🎉
-  heatmapAPI.getRiskScore(c.lat, c.lng)       // Now hits /heatmap/risk-score 🎉
-]);
+        heatmapAPI.nearby(c.lat, c.lng, radiusKm),
+        heatmapAPI.getRiskScore(c.lat, c.lng)
+      ]);
 
       setItems(Array.isArray(incidentsResponse.data) ? incidentsResponse.data : []);
       
@@ -91,18 +109,32 @@ export default function HeatmapScreen() {
     }
   }
 
-  // Trigger loading automatically during startup lifecycle mount
+  // Calculate alternative pathways between origin coordinates and long-pressed destination marker
+  async function computeSafetyPath(destLat: number, destLng: number) {
+    if (!coords) return;
+    try {
+      setRoutingLoading(true);
+      const response = await heatmapAPI.getSafestRoute(coords.lat, coords.lng, destLat, destLng);
+      if (response.data && response.data.safest_route) {
+        setSafestRoute(response.data.safest_route);
+      }
+    } catch (error: any) {
+      Alert.alert('Routing Error', error?.response?.data?.detail || 'Failed to compute a safe map path configuration.');
+      setDestination(null);
+      setSafestRoute(null);
+    } finally {
+      setRoutingLoading(false);
+    }
+  }
+
   useEffect(() => {
     load(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Whenever the active radius changes, re-fetch records to adjust the viewport limits
   useEffect(() => {
     if (coords) {
       load(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [radiusKm]);
 
   const region = useMemo(() => {
@@ -183,13 +215,40 @@ export default function HeatmapScreen() {
       {/* Content Viewports */}
       {mode === 'map' ? (
         <View style={styles.mapWrap}>
-          <MapView style={styles.map} initialRegion={region} region={region}>
+          <MapView 
+            style={styles.map} 
+            initialRegion={region} 
+            region={region}
+            onLongPress={(e) => {
+              const targetCoords = e.nativeEvent.coordinate;
+              setDestination({ lat: targetCoords.latitude, lng: targetCoords.longitude });
+              computeSafetyPath(targetCoords.latitude, targetCoords.longitude);
+            }}
+          >
             {coords && (
               <Marker
                 coordinate={{ latitude: coords.lat, longitude: coords.lng }}
                 title="You"
                 description="Your current location"
                 pinColor={colors.primary}
+              />
+            )}
+
+            {destination && (
+              <Marker 
+                coordinate={{ latitude: destination.lat, longitude: destination.lng }}
+                title="Target Destination"
+                description="Calculating safest structural route path"
+                pinColor="#E91E63"
+              />
+            )}
+
+            {/* Display polyline structure overlay on top of map engine */}
+            {safestRoute && safestRoute.geometry && (
+              <Polyline 
+                coordinates={safestRoute.geometry}
+                strokeWidth={5}
+                strokeColor="#00E676"
               />
             )}
 
@@ -207,9 +266,26 @@ export default function HeatmapScreen() {
             })}
           </MapView>
 
+          {/* Interactive Routing Metric Banners inside Map Wrapper viewports */}
+          {routingLoading && (
+            <View style={styles.routeOverlayContainer}>
+              <ActivityIndicator color="#fff" size="small" />
+              <Text style={styles.routeOverlayText}>Analyzing path parameters...</Text>
+            </View>
+          )}
+
+          {safestRoute && !routingLoading && (
+            <View style={styles.routeOverlayContainer}>
+              <Text style={styles.routeOverlayTextHeader}>🛡️ Safest Route Selected</Text>
+              <Text style={styles.routeOverlayText}>
+                Corridor Incidents: {safestRoute.incident_count} • Dist: {(safestRoute.distance_meters / 1000).toFixed(2)} km
+              </Text>
+            </View>
+          )}
+
           <View style={styles.mapHint}>
             <Text style={styles.mapHintText}>
-              Showing {items.length} reports • Tap pins to see details
+              {safestRoute ? "Long-press anywhere else to alter route" : "Showing " + items.length + " reports • Long-press to test Safest Route"}
             </Text>
           </View>
         </View>
@@ -272,8 +348,8 @@ const styles = StyleSheet.create({
   toggleTextActive: { color: '#fff' },
   mapWrap: { flex: 1, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: colors.border },
   map: { flex: 1 },
-  mapHint: { position: 'absolute', left: 12, right: 12, bottom: 12, backgroundColor: 'rgba(0,0,0,0.45)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 14, padding: 10 },
-  mapHintText: { color: '#fff', fontWeight: '800', textAlign: 'center' },
+  mapHint: { position: 'absolute', left: 12, right: 12, bottom: 12, backgroundColor: 'rgba(0,0,0,0.65)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 14, padding: 10 },
+  mapHintText: { color: '#fff', fontWeight: '800', textAlign: 'center', fontSize: 12 },
   card: { backgroundColor: colors.card2, borderRadius: 18, borderWidth: 1, borderColor: '#2F2A57', padding: 14, marginBottom: 10 },
   cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   typeBadge: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: 'rgba(255,255,255,0.04)' },
@@ -282,4 +358,9 @@ const styles = StyleSheet.create({
   meta: { color: colors.muted, marginTop: 10 },
   desc: { color: '#fff', marginTop: 8, lineHeight: 18 },
   empty: { padding: 18, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, marginTop: 12 },
+  
+  // New overlay styling parameters for safest routing visual tracking
+  routeOverlayContainer: { position: 'absolute', top: 12, left: 12, right: 12, backgroundColor: 'rgba(20, 16, 44, 0.9)', borderWidth: 1, borderColor: '#2F2A57', borderRadius: 14, padding: 12, flexDirection: 'column', gap: 2, alignItems: 'center', justifyContent: 'center' },
+  routeOverlayTextHeader: { color: '#00E676', fontWeight: '900', fontSize: 14 },
+  routeOverlayText: { color: '#fff', fontWeight: '700', fontSize: 12 }
 });

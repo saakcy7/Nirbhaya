@@ -1,7 +1,9 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View, ActivityIndicator } from 'react-native';
 import * as Location from 'expo-location';
-import AsyncStorage from '@react-native-async-storage/async-storage'; // Ensure this is installed!
+import AsyncStorage from '@react-native-async-storage/async-storage'; 
+import { Accelerometer } from 'expo-sensors'; // Import physical hardware sensors
+
 import { authAPI, sosAPI } from '../services/api';
 import { colors } from '../components/ui/theme';
 import { setToken, setUser } from '../storage/auth';
@@ -20,12 +22,29 @@ export default function LoginScreen({ onLoggedIn, onGoToSignup }: Props) {
   // Track guest emergency emails
   const [emergencyEmail, setEmergencyEmail] = useState('');
 
+  // Keep references to active state values to prevent closure updates from dropping inside the high-frequency sensor loop
+  const sosLoadingRef = useRef(false);
+  const emergencyEmailRef = useRef('');
+  const subscriptionRef = useRef<any>(null);
+
+  // Keep references synced
+  useEffect(() => {
+    sosLoadingRef.current = sosLoading;
+  }, [sosLoading]);
+
+  useEffect(() => {
+    emergencyEmailRef.current = emergencyEmail;
+  }, [emergencyEmail]);
+
   // Load saved guest email on launch
   useEffect(() => {
     async function loadSavedEmail() {
       try {
         const saved = await AsyncStorage.getItem('@guest_emergency_email');
-        if (saved) setEmergencyEmail(saved);
+        if (saved) {
+          setEmergencyEmail(saved);
+          emergencyEmailRef.current = saved;
+        }
       } catch (e) {
         console.warn("Couldn't load cached emergency email", e);
       }
@@ -57,18 +76,22 @@ export default function LoginScreen({ onLoggedIn, onGoToSignup }: Props) {
     }
   }
 
-  // Strategy A Guest SOS
+  // Strategy A Guest SOS Pipeline
   async function handleGuestSOS() {
-    if (!emergencyEmail.trim()) {
-      Alert.alert('Email Required', 'Please provide an emergency email address below so we know who to notify!');
+    const targetEmail = emergencyEmailRef.current.trim();
+    
+    if (!targetEmail) {
+      Alert.alert('Email Required', 'Please provide an emergency email address below so we know who to notify via shake gesture!');
       return;
     }
+
+    if (sosLoadingRef.current) return;
 
     try {
       setSosLoading(true);
 
       // Save email locally for next time
-      await AsyncStorage.setItem('@guest_emergency_email', emergencyEmail.trim());
+      await AsyncStorage.setItem('@guest_emergency_email', targetEmail);
 
       // 1. Get GPS Permissions safely
       let { status } = await Location.getForegroundPermissionsAsync();
@@ -101,18 +124,59 @@ export default function LoginScreen({ onLoggedIn, onGoToSignup }: Props) {
         user_id: null,
         latitude: finalLatitude,
         longitude: finalLongitude,
-        message: '🚨 CRITICAL: Guest emergency alert dispatched!',
-        guest_emails: [emergencyEmail.trim()] // Pass the email array to backend
+        message: '🚨 CRITICAL: Guest emergency alert dispatched via physical hardware shake gesture!',
+        guest_emails: [targetEmail]
       };
 
       await sosAPI.trigger(payload);
-      Alert.alert('🚨 SOS Dispatched', `Alert logged. Emergency email dispatched immediately to: ${emergencyEmail}`);
+      Alert.alert('🚨 SOS Dispatched', `Alert logged. Emergency email dispatched immediately to: ${targetEmail}`);
     } catch (e: any) {
       Alert.alert('SOS Failure', e?.response?.data?.detail || e?.message || 'Failed to dispatch alert.');
     } finally {
       setSosLoading(false);
     }
   }
+
+  // Initialize Android Hardware Shake Listener on Mount
+  useEffect(() => {
+    async function startSensorTracking() {
+      try {
+        const isAvailable = await Accelerometer.isAvailableAsync();
+        if (!isAvailable) return;
+
+        // Set sample updates to 100ms
+        Accelerometer.setUpdateInterval(100);
+
+        subscriptionRef.current = Accelerometer.addListener((accelerometerData) => {
+          let { x, y, z } = accelerometerData;
+
+          // Normalize gravity variations across Android builds
+          if (Math.abs(x) > 5 || Math.abs(y) > 5 || Math.abs(z) > 5) {
+            x = x / 9.81;
+            y = y / 9.81;
+            z = z / 9.81;
+          }
+
+          const totalForce = Math.sqrt(x * x + y * y + z * z);
+          const shakeThreshold = 1.8; // Android optimized sensitivity limit
+
+          if (totalForce > shakeThreshold && !sosLoadingRef.current && !loading) {
+            handleGuestSOS();
+          }
+        });
+      } catch (err) {
+        console.warn("Sensor monitoring context suspended:", err);
+      }
+    }
+
+    startSensorTracking();
+
+    return () => {
+      if (subscriptionRef.current) {
+        subscriptionRef.current.remove();
+      }
+    };
+  }, [loading]);
 
   return (
     <View style={styles.container}>
@@ -199,7 +263,7 @@ export default function LoginScreen({ onLoggedIn, onGoToSignup }: Props) {
           {sosLoading ? (
             <ActivityIndicator color="#ef4444" />
           ) : (
-            <Text style={styles.dangerBtnText}>🚨 INSTANT EMERGENCY SOS</Text>
+            <Text style={styles.dangerBtnText}>🚨 SHAKE OR TAP TO ALERT</Text>
           )}
         </Pressable>
       </View>
@@ -241,5 +305,5 @@ const styles = StyleSheet.create({
     fontWeight: '600'
   },
   dangerBtn: { backgroundColor: 'transparent', borderWidth: 2, borderColor: '#ef4444', borderRadius: 18, paddingVertical: 14, alignItems: 'center' },
-  dangerBtnText: { color: '#ef4444', fontWeight: '900', fontSize: 15 },
+  dangerBtnText: { color: '#ef4444', fontWeight: '900', fontSize: 14 },
 });

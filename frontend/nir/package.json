@@ -20,6 +20,7 @@
     "expo-image": "~2.4.1",
     "expo-location": "~18.1.6",
     "expo-router": "~5.1.11",
+    "expo-sensors": "~14.1.4",
     "expo-splash-screen": "~0.30.10",
     "react": "19.0.0",
     "react-dom": "19.0.0",

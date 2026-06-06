@@ -8,17 +8,19 @@ datasource db {
 }
 
 model User {
-  id           Int      @id @default(autoincrement())
+  id           Int              @id @default(autoincrement())
   name         String
-  email        String   @unique
-  phone        String   @unique
+  email        String           @unique
+  phone        String           @unique
   passwordHash String
-  createdAt    DateTime @default(now())
-
+  createdAt    DateTime         @default(now())
+  
+  // Relations
   contacts     TrustedContact[]
-  incidents    Incident[]
+  incidents    Incident[]       // Prisma tracks this collection...
   sosAlerts    SOSAlert[]
 }
+
 
 model TrustedContact {
   id             Int     @id @default(autoincrement())
@@ -34,29 +36,31 @@ model TrustedContact {
 
 model Incident {
   id           Int      @id @default(autoincrement())
-  reporterId   Int?
+  reporterId   Int?     // This maps to the physical database column
+  
+  // 1. ADD THIS LINE: This defines the structural object relationship for Prisma
+  reporter     User?    @relation(fields: [reporterId], references: [id], onDelete: SetNull)
+
   latitude     Float
   longitude    Float
   incidentType String
   severity     Int      @default(1)
-  description  String
+  description  String?
   areaName     String?
   timeOfDay    Int?
   reportedAt   DateTime @default(now())
   isVerified   Boolean  @default(false)
-
-  reporter     User?    @relation(fields: [reporterId], references: [id], onDelete: SetNull)
 }
 
+
 model SOSAlert {
-  id          Int      @id @default(autoincrement())
-  userId      Int
+  id          Int             @id @default(autoincrement())
+  userId      Int?            // <--- Added "?" to make this column nullable
+  user        User?           @relation(fields: [userId], references: [id], onDelete: SetNull) // <--- Changed to User? and SetNull
   latitude    Float
   longitude   Float
-  message     String   @default("I need help! Please check on me immediately.")
-  status      String   @default("active")
-  triggeredAt DateTime @default(now())
+  message     String          @default("I need help! Please check on me immediately.")
+  status      String          @default("active")
+  triggeredAt DateTime        @default(now())
   resolvedAt  DateTime?
-
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

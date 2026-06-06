@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Location from 'expo-location';
+import MapView, { Marker } from 'react-native-maps';
 import { incidentsAPI } from '../services/api';
 import { colors } from '../components/ui/theme';
 import { getUser } from '../storage/auth';
 
 export default function ReportScreen() {
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
-
   const [type, setType] = useState('unsafe_area');
   const [severity, setSeverity] = useState('2');
   const [desc, setDesc] = useState('');
@@ -20,23 +20,31 @@ export default function ReportScreen() {
     return !!coords && type.trim().length > 0 && Number.isFinite(sev) && sev >= 1 && sev <= 3;
   }, [coords, type, severity]);
 
+  // Initial fallbacks centered around Kathmandu University (KU) region
+  const initialRegion = {
+    latitude: coords?.lat ?? 27.6191,
+    longitude: coords?.lng ?? 85.5381,
+    latitudeDelta: 0.005,
+    longitudeDelta: 0.005,
+  };
+
   async function getMyLocation() {
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Location permission is required to submit a report.');
-      return null;
+      Alert.alert('Permission needed', 'Location permission helps center the map initially.');
+      return { lat: 27.6191, lng: 85.5381 }; // default fallback to KU Main Gate coordinates
     }
     const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
     return { lat: pos.coords.latitude, lng: pos.coords.longitude };
   }
 
-  async function loadLocation() {
+  async function loadInitialLocation() {
     try {
       setLocLoading(true);
       const c = await getMyLocation();
       if (c) setCoords(c);
     } catch (e: any) {
-      Alert.alert('Location error', e?.message || 'Could not get your location.');
+      console.log('Using default map coordinates fallback setup.');
     } finally {
       setLocLoading(false);
     }
@@ -44,7 +52,7 @@ export default function ReportScreen() {
 
   async function submit() {
     try {
-      if (!coords) return Alert.alert('Missing location', 'Tap refresh location first.');
+      if (!coords) return Alert.alert('Missing location', 'Please select a location on the map first.');
 
       const sev = parseInt(severity, 10);
       if (!Number.isFinite(sev) || sev < 1 || sev > 3) {
@@ -65,7 +73,7 @@ export default function ReportScreen() {
         time_of_day: new Date().getHours(),
       });
 
-      Alert.alert('Submitted', 'Thanks for reporting.');
+      Alert.alert('Submitted', 'Incident reported successfully.');
       setDesc('');
     } catch (e: any) {
       Alert.alert('Failed', e?.response?.data?.detail || e?.message || 'Could not submit report.');
@@ -75,33 +83,58 @@ export default function ReportScreen() {
   }
 
   useEffect(() => {
-    loadLocation();
+    loadInitialLocation();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.outerScroll} contentContainerStyle={styles.scrollContent}>
       <View style={styles.header}>
-        <Text style={styles.title}>Report</Text>
-        <Text style={styles.sub}>Your location is used automatically.</Text>
+        <Text style={styles.title}>Report Incident</Text>
+        <Text style={styles.sub}>Tap or drag the map to choose the incident location freely.</Text>
+      </View>
+
+      {/* Map Selection Wrapper */}
+      <View style={styles.mapContainer}>
+        <MapView
+          style={styles.map}
+          initialRegion={initialRegion}
+          onPress={(e) => {
+            const { latitude, longitude } = e.nativeEvent.coordinate;
+            setCoords({ lat: latitude, lng: longitude });
+          }}
+        >
+          {coords && (
+            <Marker
+              coordinate={{ latitude: coords.lat, longitude: coords.lng }}
+              title="Selected Incident Target"
+              pinColor={colors.primary}
+              draggable
+              onDragEnd={(e) => {
+                const { latitude, longitude } = e.nativeEvent.coordinate;
+                setCoords({ lat: latitude, lng: longitude });
+              }}
+            />
+          )}
+        </MapView>
       </View>
 
       <View style={styles.panel}>
         <View style={styles.locationLine}>
           <Text style={styles.locText}>
-            {coords ? `${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}` : 'Location not set'}
+            {coords ? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}` : 'Tap map to place point'}
           </Text>
 
           <Pressable
-            onPress={loadLocation}
+            onPress={loadInitialLocation}
             disabled={locLoading}
             style={({ pressed }) => [styles.smallBtn, pressed && { opacity: 0.92 }, locLoading && { opacity: 0.55 }]}
           >
-            <Text style={styles.smallBtnText}>{locLoading ? '…' : 'Refresh'}</Text>
+            <Text style={styles.smallBtnText}>{locLoading ? '…' : 'Reset to GPS'}</Text>
           </Pressable>
         </View>
 
-        <Text style={styles.label}>Type</Text>
+        <Text style={styles.label}>Incident Type</Text>
         <TextInput
           value={type}
           onChangeText={setType}
@@ -111,7 +144,7 @@ export default function ReportScreen() {
           autoCapitalize="none"
         />
 
-        <Text style={styles.label}>Severity (1–3)</Text>
+        <Text style={styles.label}>Severity Level (1–3)</Text>
         <TextInput
           value={severity}
           onChangeText={setSeverity}
@@ -121,12 +154,12 @@ export default function ReportScreen() {
           placeholderTextColor={colors.muted2}
         />
 
-        <Text style={styles.label}>Description</Text>
+        <Text style={styles.label}>Situation Details / Description</Text>
         <TextInput
           value={desc}
           onChangeText={setDesc}
           style={[styles.input, styles.textArea]}
-          placeholder="What happened?"
+          placeholder="What risks or incidents are happening at this point?"
           placeholderTextColor={colors.muted2}
           multiline
         />
@@ -140,19 +173,30 @@ export default function ReportScreen() {
             (!canSubmit || loading) && { opacity: 0.55 },
           ]}
         >
-          <Text style={styles.primaryText}>{loading ? 'Submitting…' : 'Submit'}</Text>
+          <Text style={styles.primaryText}>{loading ? 'Submitting Report…' : 'File Secure Report'}</Text>
         </Pressable>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg, padding: 16, gap: 12 },
-
-  header: {},
-  title: { color: colors.text, fontSize: 24, fontWeight: '900' },
-  sub: { color: colors.muted, marginTop: 6 },
+  outerScroll: { flex: 1, backgroundColor: colors.bg },
+  scrollContent: { padding: 16, gap: 12, paddingBottom: 40 },
+  header: { marginBottom: 4 },
+  title: { color: '#fff', fontSize: 24, fontWeight: '900' },
+  sub: { color: colors.muted, marginTop: 6, lineHeight: 18 },
+  
+  mapContainer: {
+    height: 180,
+    borderRadius: 22,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+    marginVertical: 4,
+  },
+  map: { flex: 1 },
 
   panel: {
     backgroundColor: colors.card,
@@ -161,21 +205,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-
-  locationLine: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 12,
-    padding: 12,
-    borderRadius: 18,
-    backgroundColor: colors.card2,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  locText: { color: '#fff', fontWeight: '900' },
-
+ locationLine: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between', // << Make sure it just says this!
+  gap: 12,
+  marginBottom: 12,
+  padding: 12,
+  borderRadius: 18,
+  backgroundColor: colors.card2,
+  borderWidth: 1,
+  borderColor: colors.border,
+},
+  locText: { color: '#fff', fontWeight: '900', fontSize: 13 },
   smallBtn: {
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
@@ -184,8 +226,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
   },
-  smallBtnText: { color: '#fff', fontWeight: '900' },
-
+  smallBtnText: { color: '#fff', fontWeight: '900', fontSize: 11 },
   label: { color: colors.muted, fontWeight: '800', marginBottom: 6, fontSize: 12 },
   input: {
     backgroundColor: colors.card2,
@@ -197,8 +238,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginBottom: 12,
   },
-  textArea: { height: 110, textAlignVertical: 'top' },
-
+  textArea: { height: 90, textAlignVertical: 'top' },
   primary: {
     backgroundColor: colors.primary,
     borderRadius: 16,
@@ -206,6 +246,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
+    marginTop: 6,
   },
   primaryText: { color: '#fff', fontWeight: '900' },
 });

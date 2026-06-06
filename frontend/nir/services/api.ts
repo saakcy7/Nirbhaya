@@ -21,11 +21,6 @@ export const sosAPI = {
 };
 
 export const incidentsAPI = {
-  nearby: (lat: number, lng: number, radiusKm = 2.0) =>
-    api.get('/incidents/nearby', {
-      params: { lat, lng, radius_km: radiusKm },
-    }),
-
   locationHistory: (lat: number, lng: number, radiusKm = 1.5) =>
     api.get('/incidents/location-history', {
       params: { lat, lng, radius_km: radiusKm },
@@ -43,9 +38,18 @@ export const incidentsAPI = {
   }) => api.post('/incidents/report', payload),
 };
 
+// Cleaned up Heatmap Domain APIs
 export const heatmapAPI = {
+  // FIX 1: Map "nearby" here so it routes to /heatmap/nearby instead of /incidents/nearby
+  nearby: (lat: number, lng: number, radiusKm = 2.0) =>
+    api.get('/heatmap/nearby', {
+      // FIX 2: Backend Zod schema expects 'radius', not 'radius_km' for this endpoint
+      params: { lat, lng, radius: radiusKm }, 
+    }),
+
   getGrid: (lat: number, lng: number, radius = 5) =>
     api.get(`/heatmap/grid?lat=${lat}&lng=${lng}&radius_km=${radius}`),
+
   getRiskScore: (lat: number, lng: number, hour?: number) =>
     api.get(`/heatmap/risk-score?lat=${lat}&lng=${lng}${hour !== undefined ? `&hour=${hour}` : ''}`)
 };

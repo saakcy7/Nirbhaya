@@ -1,10 +1,13 @@
-function bbox(lat, lng, radiusKm) {
-  const delta = radiusKm / 111.0;
+// Calculate bounding box for given latitude, longitude and radius (km)
+function bbox(lat, lng, radius_km) {
+  const latR = radius_km / 110.574;
+  const lngR = radius_km / (111.320 * Math.cos((lat * Math.PI) / 180));
   return {
-    latMin: lat - delta,
-    latMax: lat + delta,
-    lngMin: lng - delta,
-    lngMax: lng + delta,
+    latMin: lat - latR,
+    latMax: lat + latR,
+    lngMin: lng - lngR,
+    lngMax: lng + lngR,
   };
 }
+
 module.exports = { bbox };

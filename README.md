@@ -188,3 +188,8 @@ Please follow existing code style conventions and include relevant tests where a
 <div align="center">
   <sub>Built with purpose. Stay fearless. 🛡️</sub>
 </div>
+
+
+<img width="1080" height="2340" alt="Screenshot_20260608_002636_Expo Go" src="https://github.com/user-attachments/assets/ac52554b-ff85-487e-8d6c-811a5567219e" />
+
+

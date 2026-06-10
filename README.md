@@ -192,4 +192,21 @@ Please follow existing code style conventions and include relevant tests where a
 
 <img width="1080" height="2340" alt="Screenshot_20260608_002636_Expo Go" src="https://github.com/user-attachments/assets/ac52554b-ff85-487e-8d6c-811a5567219e" />
 
+<img width="1080" height="2340" alt="Screenshot_20260608_002358_Expo Go" src="https://github.com/user-attachments/assets/724ab3d6-4b68-453f-9aa4-b29d45eb853c" />
+
+<img width="1080" height="2340" alt="Screenshot_20260608_002414_Expo Go" src="https://github.com/user-attachments/assets/01aaee3b-f5ff-4159-9493-ca948f5f25cf" />
+
+<img width="1080" height="2340" alt="Screenshot_20260608_002534_Expo Go" src="https://github.com/user-attachments/assets/63e0290b-f7b9-43e5-8d49-cd21b73a058b" />
+
+<img width="1080" height="2340" alt="Screenshot_20260608_002534_Expo Go" src="https://github.com/user-attachments/assets/eed8e56f-9791-4bce-a9e9-aac49945fc68" />
+
+
+<img width="1080" height="2340" alt="Screenshot_20260608_002553_Expo Go" src="https://github.com/user-attachments/assets/2cdc28ce-6a5b-49bd-af4d-10265ebfb59b" />
+
+
+
+
+
+
+
 
